@@ -8,7 +8,6 @@ import math
 import logging
 import pandas as pd
 from GBDT.decision_tree import Tree
-from GBDT.loss_function import SquaresError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
@@ -16,23 +15,37 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
 
 
-class AbstractBaseGradientBoosting(metaclass=abc.ABCMeta):
-    def __init__(self):
-        pass
+class SquaresError():
 
-    def fit(self, data):
-        pass
+    def initialize_f_0(self, data):
+        data['f_0'] = data['label'].mean()
+        return data['label'].mean()
 
-    def predict(self, data):
-        pass
+    def calculate_residual(self, data, iter):
+        res_name = 'res_' + str(iter)
+        f_prev_name = 'f_' + str(iter - 1)
+        data[res_name] = data['label'] - data[f_prev_name]
 
+    def update_f_m(self, data, trees, iter, learning_rate, logger):
+        f_prev_name = 'f_' + str(iter - 1)
+        f_m_name = 'f_' + str(iter)
+        data[f_m_name] = data[f_prev_name]
+        for leaf_node in trees[iter].leaf_nodes:
+            data.loc[leaf_node.data_index, f_m_name] += learning_rate * leaf_node.predict_value
+        # 打印每棵树的 train loss
+        self.get_train_loss(data['label'], data[f_m_name], iter, logger)
 
-class BaseGradientBoosting(AbstractBaseGradientBoosting):
+    def update_leaf_values(self, targets, y):
+        return targets.mean()
 
-    def __init__(self, loss, learning_rate, n_trees, max_depth,
+    def get_train_loss(self, y, f, iter, logger):
+        loss = ((y - f) ** 2).mean()
+        logger.info(('第%d棵树: mse_loss:%.4f' % (iter, loss)))
+
+class GradientBoostingRegressor():
+    def __init__(self, learning_rate, n_trees, max_depth,
                  min_samples_split=2, is_log=False, is_plot=False):
-        super().__init__()
-        self.loss = loss
+        self.loss = SquaresError()
         self.learning_rate = learning_rate
         self.n_trees = n_trees
         self.max_depth = max_depth
@@ -45,7 +58,7 @@ class BaseGradientBoosting(AbstractBaseGradientBoosting):
 
     def fit(self, data):
         """
-        :param data: pandas.DataFrame, the features data of train training   
+        :param data: pandas.DataFrame, the features data of train training
         """
         # 掐头去尾， 删除id和label，得到特征名称
         self.features = list(data.columns)[1: -1]
@@ -67,13 +80,6 @@ class BaseGradientBoosting(AbstractBaseGradientBoosting):
             self.trees[iter] = Tree(data, self.max_depth, self.min_samples_split,
                                     self.features, self.loss, target_name, logger)
             self.loss.update_f_m(data, self.trees, iter, self.learning_rate, logger)
-
-
-class GradientBoostingRegressor(BaseGradientBoosting):
-    def __init__(self, learning_rate, n_trees, max_depth,
-                 min_samples_split=2, is_log=False, is_plot=False):
-        super().__init__(SquaresError(), learning_rate, n_trees, max_depth,
-                         min_samples_split, is_log, is_plot)
 
     def predict(self, data):
         data['f_0'] = self.f_0
